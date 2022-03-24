@@ -14,6 +14,7 @@ import math
 import pygame
 import tcod as libtcod
 import Game
+import Mutators
 
 ####################################################
 # Importing RiftWizard.py                          |
@@ -381,9 +382,20 @@ original_save_game = Game.Game.save_game
 def save_game(self, filename=None):
     all_player_spells = self.all_player_spells
     all_player_skills = self.all_player_skills
-    if not self.mutators:
-        # FIXME we could check for if mutators have default mutator calls for this
+    
+    save_skills = False
+    save_spells = False
+    for m in self.mutators:
+        # the default mutator methods dont modify the spell list
+        if not m.on_generate_spells.__func__ == Mutators.Mutator.on_generate_spells:
+            save_spells = True
+        if not m.on_generate_skills.__func__ == Mutators.Mutator.on_generate_skills:
+            save_skills = True
+    
+    if not save_spells:
         self.all_player_spells = None
+    
+    if not save_skills:
         self.all_player_skills = None
     
     # sometimes old prev_next_level from a previous level is still in memory, we can just wipe it here
