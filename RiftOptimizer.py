@@ -417,6 +417,125 @@ if replace_only_vanilla_code(Game.Game.save_game,save_game):
     Game.continue_game = continue_game
     RiftWizard.continue_game = continue_game
 
+# get_shop_options is called roughly 4 times a frame
+# on vanilla on my machine it takes approximately 0.2 - 0.6 ms per call on my machine
+# this optimized version keeps track of pre-sorted lists for each tag
+# and finds the sorted union of the lists you are looking for.
+# this takes about 0.03 - 0.2 ms.
+# and then appropriately, caches the results, so calls after
+# the initial user changing the tag are very fast, on the scale
+# of 0.01 ms. the very first call to build the tagged lists
+# takes ~0.6ms but since the other 3 calls in that frame use a cached
+# result, you still get a win even on that frame
+
+last_all_player_spells = None
+last_all_player_skills = None
+
+tagged_spell_lists = None
+tagged_skill_lists = None
+def retrieve_tagged_shop_lists(unfiltered_options):
+    output = dict()
+    
+    for index, option in enumerate(unfiltered_options):
+        option.sort_index = index
+        for tag in option.tags:
+            if tag not in output:
+                output[tag] = []
+            output[tag].append(option)
+    
+    return output
+
+previous_shop_tag_filter = set()
+previous_shop_unfiltered_options = None
+previous_shop_results = None
+
+def get_shop_options(self):
+    if self.shop_type == RiftWizard.SHOP_TYPE_SPELLS or self.shop_type == RiftWizard.SHOP_TYPE_UPGRADES:
+        if self.shop_type == RiftWizard.SHOP_TYPE_SPELLS:
+            if len(self.tag_filter) == 0:
+                return self.game.all_player_spells
+            
+            global last_all_player_spells
+            global tagged_spell_lists
+            if last_all_player_spells != self.game.all_player_spells:
+                last_all_player_spells = self.game.all_player_spells
+                tagged_spell_lists = retrieve_tagged_shop_lists(last_all_player_spells)
+            
+            tagged_lists = tagged_spell_lists
+            unfiltered_options = self.game.all_player_spells
+        else:
+            if len(self.tag_filter) == 0:
+                return self.game.all_player_skills
+            
+            global last_all_player_skills
+            global tagged_skill_lists
+            if last_all_player_skills != self.game.all_player_skills:
+                last_all_player_skills = self.game.all_player_skills
+                tagged_skill_lists = retrieve_tagged_shop_lists(last_all_player_skills)
+            
+            tagged_lists = tagged_skill_lists
+            unfiltered_options = self.game.all_player_skills
+        
+        global previous_shop_unfiltered_options
+        global previous_shop_tag_filter
+        global previous_shop_results
+        if previous_shop_unfiltered_options == unfiltered_options and previous_shop_tag_filter == self.tag_filter:
+            return previous_shop_results
+        
+        previous_shop_unfiltered_options = unfiltered_options
+        previous_shop_tag_filter.clear()
+        previous_shop_tag_filter |= self.tag_filter
+        
+        filtered_shop_options = []
+        new_filtered_shop_options = []
+        
+        # there's gotta be a cleaner way to do this than this boolean
+        have_done_first = False
+        for t in self.tag_filter:
+            if have_done_first:
+                filtered_index = 0
+                filtered_length = len(filtered_shop_options)
+                
+                for tagged in tagged_lists[t]:
+                    if filtered_index >= filtered_length:
+                        break
+                    
+                    while (filtered_shop_options[filtered_index].level, filtered_shop_options[filtered_index].name) < (tagged.level, tagged.name):
+                        filtered_index += 1
+                        
+                        if filtered_index >= filtered_length:
+                            break
+                    
+                    if filtered_index >= filtered_length:
+                        break
+                    
+                    filtered_obj = filtered_shop_options[filtered_index]
+                    if filtered_obj == tagged:
+                        new_filtered_shop_options.append(filtered_obj)
+                        filtered_index += 1
+                
+                temp = filtered_shop_options
+                filtered_shop_options = new_filtered_shop_options
+                new_filtered_shop_options = temp
+                new_filtered_shop_options.clear()
+            else:
+                filtered_shop_options += tagged_lists[t]
+                have_done_first = True
+        
+        previous_shop_results = filtered_shop_options
+        return filtered_shop_options
+    if self.shop_type == RiftWizard.SHOP_TYPE_SPELL_UPGRADES:
+        return [u for u in self.shop_upgrade_spell.spell_upgrades]
+    if self.shop_type == RiftWizard.SHOP_TYPE_SHOP:
+        if self.game.cur_level.cur_shop:
+            return self.game.cur_level.cur_shop.items
+    if self.shop_type == RiftWizard.SHOP_TYPE_BESTIARY:
+        return all_monsters
+    else:
+        return []
+
+replace_only_vanilla_code(RiftWizard.PyGameView.get_shop_options,get_shop_options)
+
 # we load ThreadedIO last because otherwise we get a nasty hang
 # if the main thread crashes first
 import mods.RiftOptimizer.ThreadedIO
