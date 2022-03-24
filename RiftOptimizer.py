@@ -58,6 +58,8 @@ def patch_general(obj, replacement):
 
 # use "whole_game_profiling" command line argument to enable profiling
 if 'whole_game_profiling' in sys.argv:
+    original_run = RiftWizard.PyGameView.run
+    
     def profiled_run(self):
         
         import time
@@ -85,7 +87,6 @@ if 'whole_game_profiling' in sys.argv:
 
     RiftWizard.PyGameView.run = profiled_run
 
-original_run = RiftWizard.PyGameView.run
 
 # blitting converted images runs slightly better. most are already in the correct format but a handful arent
 original_image_load = pygame.image.load
