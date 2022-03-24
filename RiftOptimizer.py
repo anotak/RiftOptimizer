@@ -335,7 +335,7 @@ def path_func_flying(xFrom, yFrom, xTo, yTo, userData):
 
 LEVEL_SIZE = 28
 
-def find_path(self, start, target, pather, pythonize=False):
+def find_path(self, start, target, pather, pythonize=False, cosmetic=False):
     Level.optimizer_pathing_level = self
     Level.optimizer_pathing_target = target
     
