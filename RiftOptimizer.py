@@ -530,7 +530,7 @@ def get_shop_options(self):
                 filtered_shop_options = new_filtered_shop_options
                 new_filtered_shop_options = temp
                 new_filtered_shop_options.clear()
-            else:
+            elif t in tagged_lists:
                 filtered_shop_options += tagged_lists[t]
                 have_done_first = True
         
