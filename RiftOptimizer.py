@@ -552,4 +552,66 @@ replace_only_vanilla_code(RiftWizard.PyGameView.get_shop_options,get_shop_option
 # if the main thread crashes first
 import mods.RiftOptimizer.ThreadedIO
 
-print("Rift Optimizer v2b loaded")
+print("Rift Optimizer v3 beta loaded")
+
+def cast(self, x, y, channel_cast=False):
+	if self.get_stat('channel') and not channel_cast:
+		self.first_channel_cast = True
+		self.caster.apply_buff(Level.ChannelBuff(self.cast, Level.Point(x, y)), 10)
+		return
+
+	start = Level.Point(self.caster.x, self.caster.y)
+	target = Level.Point(x, y)
+
+	dtypes = [Level.Tags.Lightning]
+
+	if self.get_stat('judgement'):
+		dtypes = [Level.Tags.Lightning, Level.Tags.Holy, Level.Tags.Dark]
+	if self.get_stat('energy'):
+		dtypes = [Level.Tags.Lightning, Level.Tags.Fire, Level.Tags.Arcane]
+
+	for dtype in dtypes:
+		for point in Level.Bolt(self.caster.level, start, target):
+			self.caster.level.deal_damage(point.x, point.y, self.get_stat('damage'), dtype, self)
+
+		for i in range(4):
+			yield
+	
+	
+	if channel_cast:
+		if self.first_channel_cast:
+			self.first_channel_cast = False
+			channel_buff = None
+		
+			for b in self.owner.buffs:
+				if isinstance(b, Level.ChannelBuff):
+					channel_buff = b
+			
+			if channel_buff != None:
+				channel_buff.spell_target = target
+		else:
+			lightning_form_buff = None
+		
+			for b in self.caster.buffs:
+				if isinstance(b, Spells.LightningFormBuff):
+					lightning_form_buff = b
+		
+			if lightning_form_buff != None:
+				self.owner.level.queue_spell(lightning_form_buff.do_teleport(target.x,target.y))
+
+Spells.LightningBoltSpell.cast = cast
+
+def do_teleport(self, x, y):
+	if self.owner.level.can_move(self.owner, x, y, teleport=True):
+		channel_buff = None
+		
+		for b in self.owner.buffs:
+			if isinstance(b, Level.ChannelBuff):
+				channel_buff = b
+		
+		if channel_buff != None:
+			channel_buff.spell_target = Level.Point(self.owner.x,self.owner.y)
+		
+		yield self.owner.level.act_move(self.owner, x, y, teleport=True)
+
+Spells.LightningFormBuff.do_teleport = do_teleport
