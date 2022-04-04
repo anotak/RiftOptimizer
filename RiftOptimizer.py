@@ -57,37 +57,85 @@ def patch_general(obj, replacement):
         target = getattr(target, attr)
     setattr(target, name, replacement)
 
+frame_profiler = None
 # use "whole_game_profiling" command line argument to enable profiling
-if 'whole_game_profiling' in sys.argv:
+if 'whole_game_profiling' in sys.argv or 'per_frame_profiling' in sys.argv or 'test_game' in sys.argv:
     original_run = RiftWizard.PyGameView.run
+    
+    whole_game_profiling = False
+    if 'whole_game_profiling' in sys.argv:
+        whole_game_profiling = True
+    
+    per_frame_profiling = False
+    if 'per_frame_profiling' in sys.argv:
+        per_frame_profiling = True
     
     def profiled_run(self):
         
+        print(inspect.getsourcefile(original_run))
         import time
         import cProfile
         import pstats
 
-        pr = cProfile.Profile()
+        if whole_game_profiling:
+            pr = cProfile.Profile()
 
-        start = time.perf_counter()
+            start = time.perf_counter()
 
-        pr.enable()
+            pr.enable()
+        
+        if per_frame_profiling:
+            global frame_profiler
+            frame_profiler = cProfile.Profile()
+            frame_profiler.enable()
+
+            original_frame = pygame.event.get
+    
+            def profiled_frame():
+                global frame_profiler
+                
+                frame_profiler.disable()
+
+                stats = pstats.Stats(frame_profiler)
+                stats.sort_stats("cumtime")
+                stats.dump_stats("draw_profile.stats")
+                stats.print_stats(0.5)
+                
+                
+                frame_profiler = cProfile.Profile()
+                frame_profiler.enable()
+                
+                return original_frame()
+            
+            pygame.event.get = profiled_frame
+            
+        if 'test_game' in sys.argv:
+            self.game = Game.Game(save_enabled=False)
+            self.game.disable_saves = True
+            self.message = RiftWizard.text.intro_text
+
+            self.center_message = True
+            self.state = RiftWizard.STATE_MESSAGE
+            self.play_music('battle_2')
 
         original_run(self)
 
-        pr.disable()
+        if whole_game_profiling:
+            pr.disable()
 
-        finish = time.perf_counter()
-        total_time = finish - start
+            finish = time.perf_counter()
+            total_time = finish - start
 
-        print("total ms: %f" % (total_time * 1000))
-        stats = pstats.Stats(pr)
-        stats.sort_stats("cumtime")
-        stats.dump_stats("draw_profile.stats")
-        stats.print_stats(0.5)
+            print("total ms: %f" % (total_time * 1000))
+            stats = pstats.Stats(pr)
+            stats.sort_stats("cumtime")
+            stats.dump_stats("draw_profile.stats")
+            stats.print_stats(0.5)
 
     RiftWizard.PyGameView.run = profiled_run
 
+
+    
 
 # blitting converted images runs slightly better. most are already in the correct format but a handful arent
 original_image_load = pygame.image.load
@@ -380,6 +428,9 @@ if replace_only_vanilla_code(Level.Level.find_path, find_path):
 original_save_game = Game.Game.save_game
 
 def save_game(self, filename=None):
+    if hasattr(self, 'disable_saves') and self.disable_saves:
+        return
+    
     all_player_spells = self.all_player_spells
     all_player_skills = self.all_player_skills
     
