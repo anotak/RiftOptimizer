@@ -463,11 +463,14 @@ def continue_game(filename=None):
     if not game.all_player_spells:
         game.all_player_spells = Spells.make_player_spells()
         game.all_player_skills = Upgrades.make_player_skills()
-    
+        
         for player_spell in game.p1.spells:
             for index, game_spell in enumerate(game.all_player_spells):
                 if game_spell.name == player_spell.name:
                     game.all_player_spells[index] = player_spell
+    
+    if not game.all_player_skills:
+        game.all_player_skills = Upgrades.make_player_skills()
         
         for player_skill in game.p1.buffs:
             for index, game_skill in enumerate(game.all_player_skills):
