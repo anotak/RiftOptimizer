@@ -596,7 +596,7 @@ def get_shop_options(self):
         if self.game.cur_level.cur_shop:
             return self.game.cur_level.cur_shop.items
     if self.shop_type == RiftWizard.SHOP_TYPE_BESTIARY:
-        return all_monsters
+        return LevelGen.all_monsters
     else:
         return []
 
