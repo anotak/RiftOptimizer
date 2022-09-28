@@ -554,11 +554,6 @@ def save_game(self, filename=None):
         if hasattr(unit,'description'):
             delattr(unit,'description')
     
-    #for row in self.cur_level.tiles:
-        #for tile in row:
-            #attrs = vars(tile)
-            #print(', '.join("%s: %s" % item for item in attrs.items()))
-    
     # a lot of the savegame time was spent in saving the list of spells and skills
     all_player_spells = self.all_player_spells
     all_player_skills = self.all_player_skills
