@@ -425,12 +425,141 @@ if replace_only_vanilla_code(Level.Level.find_path, find_path):
     path_obj_flying = libtcod.path_new_using_function(LEVEL_SIZE, LEVEL_SIZE, path_func_flying)
     path_obj_walking = libtcod.path_new_using_function(LEVEL_SIZE, LEVEL_SIZE, path_func_walking)
 
+def tile_init(self, char='*', color=RiftWizard.Color(255, 0, 125), can_walk=True, x=0, y=0, level=None):
+    # .sprite doesnt do anything useful and just takes up time on save/load
+    #self.sprite = Sprite(char, color)
+    self.sprite_override = None
+    self.can_walk = can_walk
+    self.can_see = True
+    self.can_fly = True
+    self.unit = None
+    self.prop = None
+    self.cloud = None
+    # likewise about name and description
+    #self.name = "Tile"
+    #self.description = "Tile"
+    self.x = x
+    self.y = y
+    self.is_chasm = False
+    self.level = level
+    self.sprites = None
+    self.star = None
+
+replace_only_vanilla_code(Level.Tile.__init__, tile_init)
+
+# again, let's cut out the descriptions and the names of the tiles, they do nothing
+def make_wall(self, x, y, calc_glyph=True):
+    tile = self.tiles[x][y]
+    tile.sprites = None
+    tile.can_walk = False
+    tile.can_see = False
+    tile.can_fly = False
+    tile.is_chasm = False
+    #tile.name = "Wall"
+    #tile.description = "Solid rock"
+            
+    if calc_glyph:
+        tile.calc_glyph()
+
+    if self.tcod_map:
+        libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
+
+replace_only_vanilla_code(Level.Level.make_wall, make_wall)
+
+def make_floor(self, x, y, calc_glyph=True):
+    tile = self.tiles[x][y]
+    tile.sprites = None
+    tile.can_walk = True
+    tile.can_see = True
+    tile.can_fly = True
+    tile.is_chasm = False
+    #tile.name = "Floor"
+    #tile.description = "A rough rocky floor"
+
+    if calc_glyph:
+        tile.calc_glyph()
+
+    if self.tcod_map:
+        libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
+
+replace_only_vanilla_code(Level.Level.make_floor, make_floor)
+
+def make_chasm(self, x, y, calc_glyph=True):
+    tile = self.tiles[x][y]
+    tile.sprites = None
+    tile.can_walk = False
+    tile.can_see = True
+    tile.can_fly = True
+    tile.is_chasm = True
+    #tile.name = "The Abyss"
+    #tile.description = "Look closely and you might see the glimmer of distant worlds."
+
+    if calc_glyph:
+        tile.calc_glyph()
+
+    if self.tcod_map:
+        libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
+
+replace_only_vanilla_code(Level.Level.make_chasm, make_chasm)
+
+def remove_obj(self, obj):
+    if isinstance(obj, Level.Unit):
+        # Unapply to unsubscribe
+        for buff in obj.buffs:
+            buff.unapply()
+        
+        # thanks to JohnSolaris, clear up some event handler leaks
+        # (saves memory and reduces savegame time)
+        if obj.Anim:
+            obj.Anim.unregister()
+            obj.Anim = None
+        for evt_type in self.event_manager._handlers.keys():
+            if obj in self.event_manager._handlers[evt_type].keys():
+                self.event_manager._handlers[evt_type].pop(obj)
+
+        assert(self.tiles[obj.x][obj.y].unit == obj)
+        self.tiles[obj.x][obj.y].unit = None
+
+        assert(obj in self.units)
+        self.units.remove(obj)
+
+    if isinstance(obj, Level.Cloud):
+        assert(self.tiles[obj.x][obj.y].cloud == obj)
+        self.tiles[obj.x][obj.y].cloud = None
+        self.clouds.remove(obj)
+
+    if isinstance(obj, Level.Prop):
+        self.remove_prop(obj)
+    
+    
+    obj.removed = True
+
+replace_only_vanilla_code(Level.Level.remove_obj, remove_obj)
+
 original_save_game = Game.Game.save_game
 
 def save_game(self, filename=None):
     if hasattr(self, 'disable_saves') and self.disable_saves:
         return
     
+    self.cur_level.chasm_anims = None
+    
+    for unit in self.cur_level.units:
+        if hasattr(unit.sprite,'char'):
+            delattr(unit.sprite,'char')
+        
+        if hasattr(unit.sprite,'color'):
+            delattr(unit.sprite,'color')
+        
+        if hasattr(unit,'description'):
+            delattr(unit,'description')
+    
+    #for row in self.cur_level.tiles:
+        #for tile in row:
+            #attrs = vars(tile)
+            #print(', '.join("%s: %s" % item for item in attrs.items()))
+    
+    # a lot of the savegame time was spent in saving the list of spells and skills
     all_player_spells = self.all_player_spells
     all_player_skills = self.all_player_skills
     
