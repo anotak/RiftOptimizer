@@ -182,21 +182,35 @@ RiftOptimizer.replace_only_vanilla_code(RiftWizard.PyGameView.make_level_end_scr
 
 def setup_logger_thread(channel):
     try:
+        # let's wait for the first message
+        try:
+            msg = channel.get(timeout=1)
+        except queue.Empty:
+            print("\nthe ThreadedIO queue was empty after 1 second. the main thread might have crashed. will give up in 10 more seconds")
+            # TODO - should this be configurable?
+            giveup_timer = 10
+            
+            while giveup_timer > 0:
+                try:
+                    msg = channel.get(timeout=1)
+                except queue.Empty:
+                    giveup_timer -= 1
+                    if giveup_timer <= 3 and giveup_timer > 0:
+                        print(giveup_timer)
+            
+            if giveup_timer <= 0:
+                # TODO - revert to default functions first?
+                return
+        
+        if not handle_message(msg):
+            return
+        
         # messages arrive and are executed sequentially in the same order as the main thread sent them
         while True:
             msg = channel.get()
-            if msg == "quit":
+            
+            if not handle_message(msg):
                 return
-            elif hasattr(msg, '__len__') and len(msg) == 2 and callable(msg[0]):
-                if hasattr(msg[1], '__iter__'):
-                    msg[0](*msg[1])
-                else:
-                    msg[0](msg[1])
-            elif isinstance(msg, RiftWizard.PyGameView):
-                root_window = msg
-            else:
-                print("unknown message to IO thread:")
-                print(msg)
     except:
         # just crash the whole game if the io thread crashes
         if not root_window:
@@ -204,6 +218,24 @@ def setup_logger_thread(channel):
         
         root_window.running = False
         raise
+
+def handle_message(msg):
+    if msg == "quit":
+        back_channel.put("quitting")
+        return False
+    elif hasattr(msg, '__len__') and len(msg) == 2 and callable(msg[0]):
+        if hasattr(msg[1], '__iter__'):
+            msg[0](*msg[1])
+        else:
+            msg[0](msg[1])
+    elif isinstance(msg, RiftWizard.PyGameView):
+        root_window = msg
+    else:
+        print("unknown message to IO thread:")
+        print(msg)
+    
+    return True
+
 
 channel = queue.Queue()
 
@@ -238,6 +270,7 @@ def run(self):
         raise
     
     channel.put("quit")
+    back_channel.get(timeout=2)
     
     io_thread.join()
 
