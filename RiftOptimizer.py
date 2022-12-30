@@ -35,6 +35,12 @@ RiftWizard = get_RiftWizard() #                    |
 #                                                  |
 ####################################################
 
+try:
+    import mods.RiftOptimizer.FPS_API
+except ImportError:
+    import mods.RiftOptimizer.FPS_NoAPI
+
+
 # replaces vanilla code without overwriting other mods' code
 def replace_only_vanilla_code(original_function, replacing_function):
     import inspect
