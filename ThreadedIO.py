@@ -270,7 +270,12 @@ def run(self):
         raise
     
     channel.put("quit")
-    back_channel.get(timeout=2)
+    
+    # give the io thread time to close
+    try:
+        back_channel.get(timeout=2)
+    except queue.Empty:
+        pass
     
     io_thread.join()
 
