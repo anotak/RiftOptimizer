@@ -187,7 +187,7 @@ def run(self):
                     self.play_music('victory_theme')
 
             if self.game and self.game.deploying and not self.deploy_target:
-                self.deploy_target = Point(self.game.p1.x, self.game.p1.y)
+                self.deploy_target = Level.Point(self.game.p1.x, self.game.p1.y)
                 self.tab_targets = [t for t in self.game.next_level.iter_tiles() if isinstance(t.prop, Portal)]
 
             self.process_level_input()
