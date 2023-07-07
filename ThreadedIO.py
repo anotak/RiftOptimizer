@@ -193,6 +193,10 @@ def setup_logger_thread(channel):
             while giveup_timer > 0:
                 try:
                     msg = channel.get(timeout=1)
+                    
+                    print("communication reestablished\n")
+                    
+                    break
                 except queue.Empty:
                     giveup_timer -= 1
                     if giveup_timer <= 3 and giveup_timer > 0:
