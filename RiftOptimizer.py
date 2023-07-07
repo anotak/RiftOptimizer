@@ -736,4 +736,4 @@ replace_only_vanilla_code(RiftWizard.PyGameView.get_shop_options,get_shop_option
 # if the main thread crashes first
 import mods.RiftOptimizer.ThreadedIO
 
-print("Rift Optimizer v3 loaded")
+print("Rift Optimizer v4 loaded")
