@@ -1,3 +1,7 @@
+# exclude from patching
+DONT_PATCH_MY_STAR_IMPORTS = True
+from mods.RiftOptimizer.Patcher import *
+
 import threading
 import queue
 import Level
@@ -31,6 +35,11 @@ RiftWizard = get_RiftWizard() #                    |
 #                                                  |
 ####################################################
 
+import sys
+
+need_to_setup_print_logs = False
+if 'print' in sys.argv:
+    need_to_setup_print_logs = True
 
 # Level.py calls both logging.debug and Logger.debug which are distinct apparently
 original_logging_debug = logging.debug
@@ -48,7 +57,10 @@ def local_setup_logging(self):
     # Clear handlers if they exist
     for h in list(self.combat_log.handlers):
         self.combat_log.removeHandler(h)
-
+    
+    if need_to_setup_print_logs:
+        self.combat_log.addHandler(logging.StreamHandler(sys.stdout))
+    
     self.combat_log.addHandler(logging.FileHandler(os.path.join(self.logdir if self.logdir else '.', 'combat_log.txt'), mode='a'))
 
 LevelGen.level_logger.debug = log_debug.__get__(LevelGen.level_logger,logging.Logger)

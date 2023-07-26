@@ -2,6 +2,12 @@
 import sys
 sys.path.append('../..')
 
+# exclude from patching
+DONT_PATCH_MY_STAR_IMPORTS = True
+from mods.RiftOptimizer.Patcher import *
+
+#print(sys.version)
+
 import Upgrades
 import Spells
 import Monsters
@@ -40,28 +46,6 @@ try:
 except ImportError:
     import mods.RiftOptimizer.FPS_NoAPI
 
-
-# replaces vanilla code without overwriting other mods' code
-def replace_only_vanilla_code(original_function, replacing_function):
-    import inspect
-    
-    path = inspect.getsourcefile( original_function )
-    
-    if "mods\\" in path or "mods/" in path:
-        return False
-    
-    patch_general(original_function, replacing_function)
-    
-    return True
-
-# credit to ceph3us for this function, thank you
-def patch_general(obj, replacement):
-    parts = obj.__qualname__.split('.')
-    root_global, path, name = parts[0], parts[1:-1], parts[-1]
-    target = obj.__globals__[root_global]
-    for attr in path:
-        target = getattr(target, attr)
-    setattr(target, name, replacement)
 
 frame_profiler = None
 # use "whole_game_profiling" command line argument to enable profiling
@@ -141,7 +125,378 @@ if 'whole_game_profiling' in sys.argv or 'per_frame_profiling' in sys.argv or 't
     RiftWizard.PyGameView.run = profiled_run
 
 
+def can_spawn(self, levelgen):
+    if not self.tags:
+        return True
+
+    if levelgen.difficulty < self.min_level:
+        return False
+
+    if not (hasattr(levelgen.level,'wall_count') and hasattr(levelgen.level,'chasm_count')):
+        wall_count = 0
+        chasm_count = 0
+        
+        for t in levelgen.level.iter_tiles():
+            if t.is_wall():
+                wall_count += 1
+            
+            if t.is_chasm:
+                chasm_count += 1
+        
+        levelgen.level.wall_count = wall_count
+        levelgen.level.chasm_count = chasm_count
     
+    if self.limit_walls:
+        if levelgen.level.wall_count > 150:
+            return False
+
+    if self.needs_chasms:
+        if levelgen.level.chasm_count < 50:
+            return False
+
+    #if self.tags:
+        #has_tags = False
+        #monsters = [s[0]() for s in levelgen.spawn_options]
+        #for tag in self.tags:
+            #for m in monsters:
+                #if tag in m.tags:
+                    #has_tags = True
+        # DIsable tags?
+        #if not has_tags:
+        #	return False
+    
+    return True
+
+replace_only_vanilla_code(LevelGen.Biome.can_spawn, can_spawn)
+
+def make_level(self):
+    LevelGen.level_logger.debug("\nGenerating level for %d" % self.difficulty)
+    LevelGen.level_logger.debug("Level id: %d" % self.level_id)
+    LevelGen.level_logger.debug("num start points: %d" % self.num_start_points)
+    LevelGen.level_logger.debug("reconnect chance: %.2f" % self.reconnect_chance)
+    LevelGen.level_logger.debug("num open spaces: %d" % self.num_open_spaces)
+    
+    self.level = Level.Level(LevelGen.LEVEL_SIZE, LevelGen.LEVEL_SIZE)
+    self.make_terrain()
+    
+    self.populate_level()
+    
+    self.level.gen_params = self
+    self.level.calc_glyphs()
+    
+    if self.difficulty == 1:
+        self.level.biome = LevelGen.all_biomes[0]
+    else:
+        
+        self.level.biome = self.random.choice([b for b in LevelGen.all_biomes if b.can_spawn(self)]) 
+    
+    self.level.tileset = self.level.biome.tileset
+    
+    # removed the nonsense here about water
+    
+    # Game looks better without water
+    self.level.water = None
+    
+    # Record info per tile so that mordred corruption works
+    for tile in self.level.iter_tiles():
+        tile.tileset = self.level.tileset
+        tile.water = self.level.water
+    
+    if self.game:
+        for m in self.game.mutators:
+            m.on_levelgen(self)
+            
+    self.log_level()
+    
+    return self.level
+
+make_level = profile_function(make_level)
+
+replace_only_vanilla_code(LevelGen.LevelGenerator.make_level, make_level)
+
+# special case of distance one euclidean
+def get_points_in_ball_one_euclidean(x,y):
+    # weird order but we have to make sure we return in same
+    # order as vanilla:
+    #            1
+    #           234
+    #            5
+    if y > 0:
+        yield (x,y-1)
+    
+    if x > 0:
+        yield (x - 1,y)
+    
+    yield (x,y)
+    
+    if x+1 < LEVEL_SIZE:
+        yield (x + 1,y)
+    
+    if y+1 < LEVEL_SIZE:
+        yield (x,y+1)
+
+def lumps(levelgen, num_lumps=None, space_size=None):
+    if num_lumps is None:
+        num_lumps = levelgen.random.randint(1, 12)
+    if space_size is None:
+        space_size = levelgen.random.randint(10, 100)
+
+    level = levelgen.level
+
+    options = []
+    max_existing = 550
+    if len([t for t in level.iter_tiles() if not t.can_walk]) < max_existing:
+        options.append('wall')
+        options.append('chasm')
+    if len([t for t in level.iter_tiles() if t.is_floor()]) < max_existing:
+        options.append('floor')
+
+    mode = levelgen.random.choice(options)
+
+    LevelGen.level_logger.debug("Lumps: %d %d (%s)" % (num_lumps, space_size, mode))
+
+    for i in range(num_lumps):
+
+        start_point = (levelgen.random.randint(0, LEVEL_SIZE-1), levelgen.random.randint(0, LEVEL_SIZE-1))
+        candidates = [start_point]
+        chosen = set()
+
+        for j in range(space_size):
+            cur_point = levelgen.random.choice(candidates)
+            candidates.remove(cur_point)
+
+            chosen.add(cur_point)
+
+            for point in get_points_in_ball_one_euclidean(cur_point[0], cur_point[1]):
+                if point not in candidates and point not in chosen:
+                    candidates.append(point)
+
+    if mode == 'wall':
+        for p in chosen:
+            level.make_wall(p[0], p[1])
+    elif mode == 'floor':
+        for p in chosen:
+            level.make_floor(p[0], p[1])
+    elif mode == 'chasm':
+        for p in chosen:
+            level.make_chasm(p[0], p[1])
+
+#lumps = profile_function(lumps)
+
+replace_only_vanilla_code_in_list(LevelGen.lumps, lumps, LevelGen.seed_mutators)
+replace_only_vanilla_code(LevelGen.lumps, lumps)
+
+# Randomly convert some number of walls to chasms
+def walls_to_chasms(levelgen):
+    level = levelgen.level
+    num_chasms = levelgen.random.choice([1, 1, 1, 2, 3, 4, 6, 7, 10, 15, 40, 40, 40, 40])
+    LevelGen.level_logger.debug("Wallchasms: %d" % num_chasms)
+
+    for i in range(num_chasms):
+        choices = [t for t in level.iter_tiles() if not t.can_see]
+        if not choices:
+            break
+
+        start_point = levelgen.random.choice(choices)
+        choices = [(start_point.x, start_point.y)]
+        for i in range(levelgen.random.randint(10, 100)):
+
+            if not choices:
+                break
+
+            current = levelgen.random.choice(choices)
+            choices.remove(current)
+
+            level.make_chasm(current[0], current[1])
+
+            for p in get_points_in_ball_one_euclidean(current[0], current[1]):
+                if not level.tiles[p[0]][p[1]].can_see:
+                    choices.append(p)
+
+
+#walls_to_chasms = profile_function(walls_to_chasms)
+
+replace_only_vanilla_code_in_list(LevelGen.walls_to_chasms, walls_to_chasms, LevelGen.mutator_table)
+replace_only_vanilla_code(LevelGen.walls_to_chasms, walls_to_chasms)
+
+# Turns all tiles surrounded by visible tiles into walls
+def wallify(levelgen):
+    level = levelgen.level
+    LevelGen.level_logger.debug("Wallify")
+    # A tile can be a chasm if all adjacent tiles are pathable without this tile
+    chasms = []
+    for i in range(1, LEVEL_SIZE - 1):
+        for j in range(1, LEVEL_SIZE - 1):
+            
+            to_add = True
+            for x in range(i-1,i+2):
+                for y in range(j-1,j+2):
+                    if not level.tiles[i][j].can_see:
+                        to_add = False
+                        break
+            
+            if to_add:
+                chasms.append((i, j))
+
+    for p in chasms:
+        level.make_wall(p[0], p[1])
+
+#wallify = profile_function(wallify)
+replace_only_vanilla_code_in_list(LevelGen.wallify, wallify, LevelGen.mutator_table)
+replace_only_vanilla_code(LevelGen.wallify, wallify)
+
+def ensure_connectivity(self, chasm=False):
+    # For each tile
+    # If it is 
+
+    # Tile -> Label
+    # For each (floor) tile
+    #  If it is not labelled
+    #  Label it i+1 and then traverse all connected tiles, assigning same label
+    # At the end you have some number of labels
+    # For each label
+    # Find the shortest distance to a tile with another label
+    # Connect those tiles by turning wall tiles into floor tiles
+    def qualifies(tile):
+        # When connecting chasms, it is ok for them to be connected over any non wall tile- just check LOS
+        if chasm:
+            return tile.can_see
+        else:
+            return tile.can_walk
+
+    def make_path(x, y):
+        if chasm:
+            if not self.level.tiles[x][y].can_see:
+                self.level.make_chasm(x, y)
+        else:
+            self.level.make_floor(x, y)
+
+    def iter_neighbors(tile):
+        visited = set([tile])
+        to_visit = [tile]
+        while to_visit:
+            cur = to_visit.pop()
+
+            xmin = max(cur.x - 1,0)
+            xmax = min(cur.x + 2, LEVEL_SIZE)
+            ymin = max(cur.y - 1,0)
+            ymax = min(cur.y + 2, LEVEL_SIZE)
+            
+            for cur_x in range(xmin, xmax):
+                for cur_y in range(ymin,ymax):
+                    t = self.level.tiles[cur_x][cur_y]
+                    
+                    if t in visited:
+                        continue
+                    
+                    if t in visited:
+                        continue
+
+                    if not qualifies(t):
+                        continue
+
+                    visited.add(t)
+                    to_visit.append(t)
+                    yield t
+
+    cur_label = 0
+    tile_labels = {}
+
+    for tile in self.level.iter_tiles():
+        # Do not label walls (or chasms when not doing the chasm pass)
+        if not qualifies(tile):
+            continue
+
+        if tile not in tile_labels:
+            cur_label += 1
+            tile_labels[tile] = cur_label
+
+            for neighbor in iter_neighbors(tile):
+                tile_labels[neighbor] = cur_label
+            
+    # Instead of using a set, deterministically shuffle a list using the seeded randomizer
+    labels_left = list(set(tile_labels.values()))
+
+    # Sort first to derandomize initial ordering
+    labels_left.sort()
+    self.random.shuffle(labels_left)
+    
+    while len(labels_left) > 1:
+        cur_label = labels_left.pop()
+        best_dist = 100000
+        best_inner = None
+        best_outer = None
+        for cur_inner in tile_labels.keys():
+            
+            if tile_labels[cur_inner] != cur_label:
+                continue
+
+            for cur_outer in tile_labels.keys():
+                if tile_labels[cur_outer] not in labels_left:
+                    continue
+
+                # we still have to use sqrted distance here to preserve vanilla seed behavior :(
+                
+                # Add random increment to randomly break ties
+                dx = (cur_inner.x - cur_outer.x)
+                dy = (cur_inner.y - cur_outer.y)
+                cur_dist = (dx * dx + dy * dy) + self.random.random()
+                if cur_dist < best_dist:
+                    best_dist = cur_dist
+                    best_inner = cur_inner
+                    best_outer = cur_outer
+
+        for p in self.level.get_points_in_line(best_inner, best_outer):
+            make_path(p.x, p.y)
+
+
+#ensure_connectivity = profile_function(ensure_connectivity)
+replace_only_vanilla_code(LevelGen.LevelGenerator.ensure_connectivity, ensure_connectivity)
+
+def conway(levelgen):
+    n = levelgen.random.choice([1, 3, 10])
+    LevelGen.level_logger.debug("Game of life: %d" % n)
+    level = levelgen.level
+    
+    grid = [[level.tiles[x][y].is_wall() for x in range(LEVEL_SIZE)] for y in range(LEVEL_SIZE)]
+
+    for i in range(n):
+        for x in range(LEVEL_SIZE):
+            for y in range(LEVEL_SIZE):
+                
+                xmin = max(x - 1,0)
+                xmax = min(x + 2, LEVEL_SIZE)
+                ymin = max(y - 1,0)
+                ymax = min(y + 2, LEVEL_SIZE)
+                
+                num_adj = 0
+                for cur_x in range(xmin, xmax):
+                    for cur_y in range(ymin,ymax):
+                        if grid[cur_x][cur_y]:
+                            num_adj += 1
+                
+                if grid[x][y]:
+                    if num_adj <= 2:
+                        grid[x][y] = False
+                    elif num_adj >= 5:
+                        grid[x][y] = False
+                    else:
+                        grid[x][y] = True
+                else:
+                    if num_adj >= 3:
+                        grid[x][y] = True
+                    else:
+                        grid[x][y] = False
+
+    for x in range(LEVEL_SIZE):
+        for y in range(LEVEL_SIZE):
+            if grid[x][y]:
+                level.make_wall(x, y)
+            else:
+                level.make_floor(x, y)
+
+replace_only_vanilla_code_in_list(LevelGen.conway, conway, LevelGen.mutator_table)
+replace_only_vanilla_code(LevelGen.conway, conway)
 
 # blitting converted images runs slightly better. most are already in the correct format but a handful arent
 original_image_load = pygame.image.load
@@ -305,6 +660,72 @@ def get_points_in_ball(self, x, y, radius, diag=False):
 
 replace_only_vanilla_code(Level.Level.get_points_in_ball,get_points_in_ball)
 
+def get_adjacent_points_no_checks(self, point):
+    adjacent = []
+    x = point.x
+    y = point.y
+    
+    if x <= 0:
+        adjacent.append(Level.Point(x + 1,y))
+        
+        if y > 0:
+            adjacent.append(Level.Point(x,y-1))
+            adjacent.append(Level.Point(x+1,y-1))
+        
+        if y+1 < self.height:
+            adjacent.append(Level.Point(x,y+1))
+            adjacent.append(Level.Point(x+1,y+1))
+    elif x+1 >= self.width:
+        adjacent.append(Level.Point(x - 1,y))
+        
+        if y > 0:
+            adjacent.append(Level.Point(x,y-1))
+            adjacent.append(Level.Point(x-1,y-1))
+        
+        if y+1 < self.height:
+            adjacent.append(Level.Point(x,y+1))
+            adjacent.append(Level.Point(x-1,y+1))
+    else:
+        adjacent.append(Level.Point(x - 1,y))
+        adjacent.append(Level.Point(x + 1,y))
+        
+        if y > 0:
+            adjacent.append(Level.Point(x,y-1))
+            adjacent.append(Level.Point(x-1,y-1))
+            adjacent.append(Level.Point(x+1,y-1))
+        
+        if y+1 < self.height:
+            adjacent.append(Level.Point(x,y+1))
+            adjacent.append(Level.Point(x-1,y+1))
+            adjacent.append(Level.Point(x+1,y+1))
+    
+    return adjacent
+
+def get_adjacent_points(self, point, filter_walkable=True, check_unit=False):
+    if filter_walkable:
+        def generator():
+            adjacent = get_adjacent_points_no_checks(self, point)
+            
+            if check_unit:
+                for p in adjacent:
+                    tile = self.tiles[p.x][p.y]
+                
+                    if tile.unit is None and tile.can_walk:
+                        yield p
+            else:
+                for p in adjacent:
+                    tile = self.tiles[p.x][p.y]
+                
+                    if tile.can_walk:
+                        yield p
+        
+        return generator()
+    else:
+        # check_unit does nothing if filter_walkable is false so idk
+        return adjacent
+
+replace_only_vanilla_code(Level.Level.get_adjacent_points,get_adjacent_points)
+
 def path_func_pythonize_walking(xFrom, yFrom, xTo, yTo, userData):
     tile = Level.optimizer_pathing_level.tiles[xTo][yTo]
 
@@ -465,7 +886,8 @@ def make_wall(self, x, y, calc_glyph=True):
     #tile.description = "Solid rock"
             
     if calc_glyph:
-        tile.calc_glyph()
+        # i'm not even sure this is necessary either hrm
+        tile.sprites = None
 
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
@@ -483,7 +905,8 @@ def make_floor(self, x, y, calc_glyph=True):
     #tile.description = "A rough rocky floor"
 
     if calc_glyph:
-        tile.calc_glyph()
+        # i'm not even sure this is necessary either hrm
+        tile.sprites = None
 
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
@@ -501,7 +924,8 @@ def make_chasm(self, x, y, calc_glyph=True):
     #tile.description = "Look closely and you might see the glimmer of distant worlds."
 
     if calc_glyph:
-        tile.calc_glyph()
+        # i'm not even sure this is necessary either hrm
+        tile.sprites = None
 
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
