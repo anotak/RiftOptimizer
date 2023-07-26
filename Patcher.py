@@ -100,6 +100,7 @@ def patch_general(obj, replacement):
         target = getattr(target, attr)
     setattr(target, name, replacement)
     
+    # anotak - okay this part after here is me not ceph3us
     if name.startswith('__'):
         # seems like a bad idea to replace stuff like __init__ here so let's not do that
         return
