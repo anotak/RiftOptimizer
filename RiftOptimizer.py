@@ -1003,6 +1003,11 @@ def remove_obj(self, obj):
 
 replace_only_vanilla_code(Level.Level.remove_obj, remove_obj)
 
+
+original_spells_count = len(Spells.make_player_spells())
+original_skills_count = len(Upgrades.make_player_skills())
+
+
 original_save_game = Game.Game.save_game
 
 def save_game(self, filename=None):
@@ -1033,6 +1038,21 @@ def save_game(self, filename=None):
             save_spells = True
         if not m.on_generate_skills.__func__ == Mutators.Mutator.on_generate_skills:
             save_skills = True
+    
+    if len(all_player_spells) != original_spells_count:
+        save_spells = True
+    if len(all_player_skills) != original_skills_count:
+        save_skills = True
+    
+    if not save_spells:
+        for s in all_player_spells:
+            if s.__module__ != 'Spells':
+                save_spells = True
+    
+    if not save_skills:
+        for s in all_player_skills:
+            if s.__module__ != 'Upgrades':
+                save_skills = True
     
     if not save_spells:
         self.all_player_spells = None
