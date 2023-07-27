@@ -124,6 +124,8 @@ if 'whole_game_profiling' in sys.argv or 'per_frame_profiling' in sys.argv or 't
 
     RiftWizard.PyGameView.run = profiled_run
 
+LEVEL_SIZE = LevelGen.LEVEL_SIZE
+LEVEL_EDGE = LEVEL_SIZE - 1
 
 def can_spawn(self, levelgen):
     if not self.tags:
@@ -210,9 +212,19 @@ def make_level(self):
     
     return self.level
 
-make_level = profile_function(make_level)
+
+#make_level = profile_function(make_level)
 
 replace_only_vanilla_code(LevelGen.LevelGenerator.make_level, make_level)
+
+def calc_glyphs(self):
+    for x in range(LEVEL_SIZE):
+        for y in range(LEVEL_SIZE):
+            self.tiles[x][y].sprites = None
+
+#calc_glyphs = profile_function(calc_glyphs, percent=1)
+
+replace_only_vanilla_code(Level.Level.calc_glyphs, calc_glyphs)
 
 # special case of distance one euclidean
 def get_points_in_ball_one_euclidean(x,y):
@@ -229,10 +241,10 @@ def get_points_in_ball_one_euclidean(x,y):
     
     yield (x,y)
     
-    if x+1 < LEVEL_SIZE:
+    if x < LEVEL_EDGE:
         yield (x + 1,y)
     
-    if y+1 < LEVEL_SIZE:
+    if y < LEVEL_EDGE:
         yield (x,y+1)
 
 def lumps(levelgen, num_lumps=None, space_size=None):
@@ -257,7 +269,7 @@ def lumps(levelgen, num_lumps=None, space_size=None):
 
     for i in range(num_lumps):
 
-        start_point = (levelgen.random.randint(0, LEVEL_SIZE-1), levelgen.random.randint(0, LEVEL_SIZE-1))
+        start_point = (levelgen.random.randint(0, LEVEL_EDGE), levelgen.random.randint(0, LEVEL_EDGE))
         candidates = [start_point]
         chosen = set()
 
@@ -325,8 +337,8 @@ def wallify(levelgen):
     LevelGen.level_logger.debug("Wallify")
     # A tile can be a chasm if all adjacent tiles are pathable without this tile
     chasms = []
-    for i in range(1, LEVEL_SIZE - 1):
-        for j in range(1, LEVEL_SIZE - 1):
+    for i in range(1, LEVEL_EDGE):
+        for j in range(1, LEVEL_EDGE):
             
             to_add = True
             for x in range(i-1,i+2):
@@ -722,7 +734,7 @@ def get_adjacent_points(self, point, filter_walkable=True, check_unit=False):
         return generator()
     else:
         # check_unit does nothing if filter_walkable is false so idk
-        return adjacent
+        return get_adjacent_points_no_checks(self, point)
 
 replace_only_vanilla_code(Level.Level.get_adjacent_points,get_adjacent_points)
 
@@ -808,8 +820,6 @@ def path_func_flying(xFrom, yFrom, xTo, yTo, userData):
     else:
         return 5.0
 
-LEVEL_SIZE = 28
-
 def find_path(self, start, target, pather, pythonize=False, cosmetic=False):
     Level.optimizer_pathing_level = self
     Level.optimizer_pathing_target = target
@@ -884,10 +894,19 @@ def make_wall(self, x, y, calc_glyph=True):
     tile.is_chasm = False
     #tile.name = "Wall"
     #tile.description = "Solid rock"
-            
+    
     if calc_glyph:
-        # i'm not even sure this is necessary either hrm
         tile.sprites = None
+        
+        if x > 0:
+            self.tiles[x-1][y].sprites = None
+        if x < LEVEL_EDGE:
+            self.tiles[x+1][y].sprites = None
+        
+        if y > 0:
+            self.tiles[x][y-1].sprites = None
+        if y < LEVEL_EDGE:
+            self.tiles[x][y+1].sprites = None
 
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
@@ -905,8 +924,17 @@ def make_floor(self, x, y, calc_glyph=True):
     #tile.description = "A rough rocky floor"
 
     if calc_glyph:
-        # i'm not even sure this is necessary either hrm
         tile.sprites = None
+        
+        if x > 0:
+            self.tiles[x-1][y].sprites = None
+        if x < LEVEL_EDGE:
+            self.tiles[x+1][y].sprites = None
+        
+        if y > 0:
+            self.tiles[x][y-1].sprites = None
+        if y < LEVEL_EDGE:
+            self.tiles[x][y+1].sprites = None
 
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
@@ -924,9 +952,18 @@ def make_chasm(self, x, y, calc_glyph=True):
     #tile.description = "Look closely and you might see the glimmer of distant worlds."
 
     if calc_glyph:
-        # i'm not even sure this is necessary either hrm
         tile.sprites = None
-
+        
+        if x > 0:
+            self.tiles[x-1][y].sprites = None
+        if x < LEVEL_EDGE:
+            self.tiles[x+1][y].sprites = None
+        
+        if y > 0:
+            self.tiles[x][y-1].sprites = None
+        if y < LEVEL_EDGE:
+            self.tiles[x][y+1].sprites = None
+    
     if self.tcod_map:
         libtcod.map_set_properties(self.tcod_map, tile.x, tile.y, tile.can_see, tile.can_walk)
 
